@@ -1,0 +1,3 @@
+clearvoice
+numpy
+torch
