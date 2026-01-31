@@ -1,3 +1,5 @@
+👉 **[English](https://github.com/freeyaers/ComfyUI-ClearerVoice-Studio/blob/main/README.md)**
+
 # ComfyUI-ClearerVoice-Studio
 
 ComfyUI 插件，使用 ClearVoice 模型进行音频处理，提供语音分离、降噪、增强和视频说话人提取功能。
@@ -153,6 +155,12 @@ ComfyUI-ClearerVoice-Studio/
 **使用方法**：将视频输入连接到节点，节点将检测说话人，跟踪他们的面部，并为每个说话人生成带有相应音频的单独视频。输出路径可以连接到其他视频处理节点或保存到磁盘。
 
 ## 工作流示例
+
+![Image text](https://github.com/freeyaers/ComfyUI-ClearerVoice-Studio/blob/main/workflows/img1.png)
+![Image text](https://github.com/freeyaers/ComfyUI-ClearerVoice-Studio/blob/main/workflows/img2.png)
+![Image text](https://github.com/freeyaers/ComfyUI-ClearerVoice-Studio/blob/main/workflows/img3.png)
+![Image text](https://github.com/freeyaers/ComfyUI-ClearerVoice-Studio/blob/main/workflows/img4.png)
+
 
 ### 基本音频降噪
 1. 使用 Load Audio 节点加载音频文件
