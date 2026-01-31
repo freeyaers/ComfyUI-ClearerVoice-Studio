@@ -1,3 +1,5 @@
+👉 **[简体中文](https://github.com/freeyaers/ComfyUI-ClearerVoice-Studio/blob/main/README_CN.md)**
+
 # ComfyUI-ClearerVoice-Studio
 
 ComfyUI plugin for audio processing using ClearVoice models, providing voice separation, denoising, enhancement, and video speaker extraction functionality.
@@ -153,6 +155,12 @@ The plugin automatically resamples audio to match the model's optimal sample rat
 **Usage**: Connect video input to the node, the node will detect speakers, track their faces, and generate separate videos with corresponding audio for each speaker. Output paths can be connected to other video processing nodes or saved to disk.
 
 ## Workflow Examples
+
+![Image text](https://github.com/freeyaers/ComfyUI-ClearerVoice-Studio/blob/main/workflows/img1.png)
+![Image text](https://github.com/freeyaers/ComfyUI-ClearerVoice-Studio/blob/main/workflows/img2.png)
+![Image text](https://github.com/freeyaers/ComfyUI-ClearerVoice-Studio/blob/main/workflows/img3.png)
+![Image text](https://github.com/freeyaers/ComfyUI-ClearerVoice-Studio/blob/main/workflows/img4.png)
+
 
 ### Basic Audio Denoising
 1. Use Load Audio node to load audio file
