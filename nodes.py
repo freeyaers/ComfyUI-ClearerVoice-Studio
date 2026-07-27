@@ -24,10 +24,10 @@ print("[1] ClearVoice nodes temp directory: {}".format(temp_dir))
 # Create temp directory if it doesn't exist
 os.makedirs(temp_dir, exist_ok=True)
 
-# Add local clearvoice directory to Python path to prioritize local import
-clearvoice_path = os.path.join(current_dir, "clearvoice")
-sys.path.insert(0, clearvoice_path)
-print("[2] Added local clearvoice path: {}".format(clearvoice_path))
+# Add local directory to Python path to prioritize local clearvoice import
+# This ensures we import from the custom node's clearvoice, not the system-installed one
+sys.path.insert(0, current_dir)
+print("[2] Added local path: {}".format(current_dir))
 
 # Import ClearVoice at module level - this is crucial for avoiding FakeModule errors
 print("[3] Initializing ClearVoice import...")
@@ -39,24 +39,6 @@ except ImportError as e:
     print("[5] Error importing ClearVoice: {}".format(e))
     print("[6] Please install ClearVoice using: pip install clearvoice")
     HAS_CLEARVOICE = False
-
-# Pre-import librosa and numba to avoid FakeModule errors
-# This is crucial for models that use librosa.resample
-print("[7] Pre-importing librosa and numba to avoid FakeModule errors...")
-try:
-    import librosa
-    import numba
-    # Force full import of librosa to avoid lazy loading issues
-    import librosa.core
-    import librosa.core.audio
-    import librosa.core.convert
-    import librosa.core.notation
-    # Force numba jit to be loaded
-    from numba import jit
-    print("[8] librosa and numba imported successfully with forced loading")
-except ImportError as e:
-    print("[9] Warning: Failed to import librosa or numba: {}".format(e))
-    print("[10] Some models may not work correctly")
 
 class ClearVoiceBaseNode:
     """Base class for ClearVoice nodes"""
