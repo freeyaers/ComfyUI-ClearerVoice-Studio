@@ -11,13 +11,10 @@ import folder_paths
 # Get current directory
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
-# Add local clearvoice directory to Python path to prioritize local import
-clearvoice_path = os.path.join(current_dir, "clearvoice")
-sys.path.insert(0, clearvoice_path)
-print(f"ClearVoice-Studio: Added local clearvoice path: {clearvoice_path}")
-
-# Add the custom nodes directory to the path for imports
-sys.path.append(current_dir)
+# Add local directory to Python path to prioritize local clearvoice import
+# This ensures we import from the custom node's clearvoice, not the system-installed one
+sys.path.insert(0, current_dir)
+print(f"ClearVoice-Studio: Added local path: {current_dir}")
 
 # Set up temp directory
 temp_dir = os.path.join(current_dir, "temp")
