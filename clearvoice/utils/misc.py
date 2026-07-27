@@ -13,7 +13,7 @@ import numpy as np
 from joblib import Parallel, delayed
 import os 
 import sys
-import librosa  # Library for audio processing
+from .. import librosa_compat as librosa
 import torchaudio  # Library for audio processing with PyTorch
 
 # Constants

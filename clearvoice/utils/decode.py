@@ -10,7 +10,7 @@ import torch.nn as nn
 import numpy as np
 import os 
 import sys
-import librosa
+from .. import librosa_compat as librosa
 import torchaudio
 from .misc import power_compress, power_uncompress, stft, istft, compute_fbank
 from .bandwidth_sub import bandwidth_sub

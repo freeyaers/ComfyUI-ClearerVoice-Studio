@@ -1,6 +1,6 @@
 import numpy as np
 import soundfile as sf
-import librosa
+from .. import librosa_compat as librosa
 import os
 from scipy.signal import butter, filtfilt, stft, istft
 
