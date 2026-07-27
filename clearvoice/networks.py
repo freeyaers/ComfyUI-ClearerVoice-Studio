@@ -18,7 +18,7 @@ import torch.backends.mps as mps
 import soundfile as sf
 import os
 import subprocess
-import librosa
+from . import librosa_compat as librosa
 from tqdm import tqdm
 import numpy as np
 from pydub import AudioSegment
