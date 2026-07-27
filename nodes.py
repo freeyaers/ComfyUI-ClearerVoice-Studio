@@ -48,7 +48,8 @@ class ClearVoiceBaseNode:
     CLEANUP_TEMP_RESOURCES = False
     
     def __init__(self):
-        pass
+        self._sr_model = None
+        self._sr_model_dir = None
     
     def process_media_input(self, media):
         """Process media input based on type (AUDIO or VIDEO)"""
@@ -154,7 +155,9 @@ class ClearVoiceBaseNode:
             wrapper.load_args_ss()
         elif task == 'target_speaker_extraction':
             wrapper.load_args_tse()
-        
+        elif task == 'speech_super_resolution':
+            wrapper.load_args_sr()
+
         # Manually set the checkpoint directory
         wrapper.args.checkpoint_dir = model_specific_dir
         print(f"ClearVoiceBaseNode: Set checkpoint_dir to: {model_specific_dir}")
@@ -188,7 +191,12 @@ class ClearVoiceBaseNode:
             model_class_map = {
                 'AV_MossFormer2_TSE_16K': CLS_AV_MossFormer2_TSE_16K
             }
-        
+        elif task == 'speech_super_resolution':
+            from clearvoice.networks import CLS_MossFormer2_SR_48K
+            model_class_map = {
+                'MossFormer2_SR_48K': CLS_MossFormer2_SR_48K
+            }
+
         if model_name not in model_class_map:
             raise RuntimeError(f"Unsupported model: {model_name}")
         
@@ -349,6 +357,98 @@ class ClearVoiceBaseNode:
                 os.unlink(temp_wav_path)
             return None
     
+    def ensure_wav_format_no_resample(self, input_path):
+        """Convert to WAV format without changing sample rate"""
+        input_path = Path(input_path)
+        if input_path.suffix.lower() == '.wav':
+            return str(input_path)
+        temp_wav = tempfile.NamedTemporaryFile(suffix='.wav', delete=False, dir=temp_dir)
+        temp_wav_path = temp_wav.name
+        temp_wav.close()
+        try:
+            cmd = [
+                "ffmpeg",
+                "-i", str(input_path),
+                "-acodec", "pcm_s16le",
+                "-ac", "1",
+                "-y",
+                temp_wav_path
+            ]
+            subprocess.run(cmd, check=True, capture_output=True)
+            return temp_wav_path
+        except Exception as e:
+            print(f"Error converting to WAV (no resample): {e}")
+            if os.path.exists(temp_wav_path):
+                os.unlink(temp_wav_path)
+            return None
+
+    def _get_or_init_sr_model(self, model_dir):
+        """Get or initialize the SR model, caching it per instance"""
+        if self._sr_model is not None and self._sr_model_dir == model_dir:
+            return self._sr_model
+        self._sr_model = self.initialize_model('speech_super_resolution', 'MossFormer2_SR_48K', model_dir)
+        self._sr_model_dir = model_dir
+        return self._sr_model
+
+    def _process_audio_with_sr(self, audio_dict, model_dir):
+        """Run audio dict through MossFormer2_SR_48K and return upsampled audio dict"""
+        import wave
+        import numpy as np
+
+        waveform = audio_dict.get('waveform')
+        sample_rate = audio_dict.get('sample_rate')
+        if waveform is None or sample_rate is None:
+            return audio_dict
+
+        # waveform shape: [1, 1, samples] or [1, channels, samples]
+        audio_np = waveform.squeeze().cpu().numpy().astype(np.float32)
+
+        # Save to temp WAV
+        temp_wav = tempfile.NamedTemporaryFile(suffix='.wav', delete=False, dir=temp_dir)
+        temp_wav_path = temp_wav.name
+        temp_wav.close()
+        try:
+            with wave.open(temp_wav_path, 'wb') as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(sample_rate)
+                wf.writeframes((audio_np * 32767).astype(np.int16).tobytes())
+
+            # Run through SR model
+            sr_model = self._get_or_init_sr_model(model_dir)
+            import uuid
+            unique_id = uuid.uuid4().hex[:8]
+            sr_output_dir = os.path.join(temp_dir, f"sr_enhance_{unique_id}")
+            os.makedirs(sr_output_dir, exist_ok=True)
+
+            sr_model.args.input_path = temp_wav_path
+            sr_model.args.output_dir = sr_output_dir
+            sr_model.process(temp_wav_path, online_write=True, output_path=sr_output_dir)
+
+            # Read output
+            output_path = None
+            for root, dirs, files in os.walk(sr_output_dir):
+                for f in files:
+                    if f.endswith('.wav'):
+                        output_path = os.path.join(root, f)
+                        break
+                if output_path:
+                    break
+
+            if not output_path:
+                return audio_dict
+
+            result = self.audio_file_to_output(output_path)
+            return result if result else audio_dict
+        except Exception as e:
+            print(f"SR enhancement failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return audio_dict
+        finally:
+            if os.path.exists(temp_wav_path):
+                os.unlink(temp_wav_path)
+
     def get_processed_audio_path(self, input_path, suffix):
         """Generate output audio path"""
         input_path = Path(input_path)
@@ -570,16 +670,19 @@ class ClearVoiceSpeechSeparationNode(ClearVoiceBaseNode):
             "required": {
                 "media": ("*",),
                 "model_name": (["MossFormer2_SS_16K"], {"default": "MossFormer2_SS_16K"}),
+            },
+            "optional": {
+                "enable_sr_enhance": ("BOOLEAN", {"default": False}),
             }
         }
-    
+
     RETURN_TYPES = ("AUDIO", "AUDIO", "AUDIO", "AUDIO", "AUDIO")
     RETURN_NAMES = ("audio_output_1", "audio_output_2", "audio_output_3", "audio_output_4", "audio_output_5")
     FUNCTION = "separate_speech"
     CATEGORY = "ClearVoice"
     TITLE = "ClearVoice Speech Separation"
-    
-    def separate_speech(self, media, model_name) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
+
+    def separate_speech(self, media, model_name, enable_sr_enhance=False) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
         """Perform speech separation"""
         import os
         import tempfile
@@ -711,8 +814,14 @@ class ClearVoiceSpeechSeparationNode(ClearVoiceBaseNode):
                 else:
                     print("[143] ClearVoiceSpeechSeparation: No files found in output directory at all.")
             
+            # Apply SR enhancement if enabled
+            if enable_sr_enhance:
+                model_dir = os.path.join(folder_paths.models_dir, "ASR", "ClearerVoice-Studio")
+                print("ClearVoiceSpeechSeparation: Applying SR enhancement...")
+                outputs = [self._process_audio_with_sr(out, model_dir) if out else out for out in outputs]
+
             pbar.update_absolute(4, 4, None)
-            
+
             print(f"Speech separation completed: {len(output_files)} speakers found")
             return tuple(outputs)
             
@@ -746,16 +855,19 @@ class ClearVoiceSpeechDenoiseNode(ClearVoiceBaseNode):
             "required": {
                 "media": ("*",),
                 "model_name": (["FRCRN_SE_16K", "MossFormer2_SE_48K", "MossFormerGAN_SE_16K"], {"default": "FRCRN_SE_16K"}),
+            },
+            "optional": {
+                "enable_sr_enhance": ("BOOLEAN", {"default": False}),
             }
         }
-    
+
     RETURN_TYPES = ("AUDIO", "VIDEO")
     RETURN_NAMES = ("audio_output", "video_output")
     FUNCTION = "denoise_speech"
     CATEGORY = "ClearVoice"
     TITLE = "ClearVoice Speech Denoise"
-    
-    def denoise_speech(self, media, model_name) -> Tuple[Dict[str, Any], object]:
+
+    def denoise_speech(self, media, model_name, enable_sr_enhance=False) -> Tuple[Dict[str, Any], object]:
         """Perform speech denoising"""
         import os
         import tempfile
@@ -937,8 +1049,41 @@ class ClearVoiceSpeechDenoiseNode(ClearVoiceBaseNode):
             else:
                 print("[150] ClearVoiceSpeechDenoise: No valid original video path provided, skipping video output")
             
+            # Apply SR enhancement if enabled
+            if enable_sr_enhance:
+                model_dir = os.path.join(folder_paths.models_dir, "ASR", "ClearerVoice-Studio")
+                print("ClearVoiceSpeechDenoise: Applying SR enhancement...")
+                audio_output = self._process_audio_with_sr(audio_output, model_dir)
+                # Re-merge video with enhanced audio if video output exists
+                if output_video is not None and original_video_path and os.path.exists(original_video_path):
+                    enh_audio_path = None
+                    wr = audio_output.get('waveform')
+                    sr = audio_output.get('sample_rate')
+                    if wr is not None and sr is not None:
+                        enh_temp = tempfile.NamedTemporaryFile(suffix='.wav', delete=False, dir=temp_dir)
+                        enh_temp_path = enh_temp.name
+                        enh_temp.close()
+                        try:
+                            import wave
+                            import numpy as np
+                            audio_np = wr.squeeze().cpu().numpy().astype(np.float32)
+                            with wave.open(enh_temp_path, 'wb') as wf:
+                                wf.setnchannels(1)
+                                wf.setsampwidth(2)
+                                wf.setframerate(sr)
+                                wf.writeframes((audio_np * 32767).astype(np.int16).tobytes())
+                            output_dir = folder_paths.get_output_directory()
+                            output_video_path = os.path.join(output_dir, "clearvoice_output.mp4")
+                            if self.replace_audio_in_video(original_video_path, enh_temp_path, output_video_path):
+                                output_video = VideoFromFile(output_video_path)
+                        except Exception as e:
+                            print(f"ClearVoiceSpeechDenoise: SR video re-merge failed: {e}")
+                        finally:
+                            if os.path.exists(enh_temp_path):
+                                os.unlink(enh_temp_path)
+
             pbar.update_absolute(4, 4, None)
-            
+
             print(f"Speech denoising completed: {output_path}")
             return (audio_output, output_video)
             
@@ -955,6 +1100,120 @@ class ClearVoiceSpeechDenoiseNode(ClearVoiceBaseNode):
                 print("[151] ClearVoiceBaseNode: Temporary resource cleanup is disabled")
 
 
+class ClearVoiceSpeechSuperResolutionNode(ClearVoiceBaseNode):
+    """ComfyUI node for speech super-resolution using ClearVoice
+
+    Model:
+    - MossFormer2_SR_48K: Upsamples low-sample-rate audio to 48kHz
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "media": ("*",),
+                "model_name": (["MossFormer2_SR_48K"], {"default": "MossFormer2_SR_48K"}),
+            }
+        }
+
+    RETURN_TYPES = ("AUDIO",)
+    RETURN_NAMES = ("audio_output",)
+    FUNCTION = "super_resolution"
+    CATEGORY = "ClearVoice"
+    TITLE = "ClearVoice Speech Super Resolution"
+
+    def super_resolution(self, media, model_name) -> Tuple[Dict[str, Any]]:
+        import os
+        import tempfile
+        import uuid
+        from comfy.utils import ProgressBar
+        from comfy_api.latest._input_impl.video_types import VideoFromFile
+
+        print(f"ClearVoiceSpeechSuperResolution: Starting super-resolution with model={model_name}")
+        print(f"ClearVoiceSpeechSuperResolution: media type={type(media)}")
+
+        if not HAS_CLEARVOICE:
+            raise RuntimeError("ClearVoice not installed")
+
+        input_path, temp_audio_path = self.process_media_input(media)
+        if not input_path:
+            raise RuntimeError("No valid input provided")
+
+        pbar = ProgressBar(3)
+        pbar.update_absolute(1, 3, None)
+
+        # Convert to WAV without resampling (SR needs original low sample rate input)
+        input_path = self.ensure_wav_format_no_resample(input_path)
+        if not input_path:
+            raise RuntimeError("Failed to process input file")
+
+        temp_resources = {
+            'temp_audio_path': temp_audio_path,
+            'processed_input': input_path,
+            'output_dir': None,
+            'output_files': []
+        }
+
+        try:
+            model_dir = os.path.join(folder_paths.models_dir, "ASR", "ClearerVoice-Studio")
+            if not os.path.exists(model_dir):
+                os.makedirs(model_dir)
+
+            os.environ['CLEARVOICE_CHECKPOINT_DIR'] = model_dir
+
+            model = self.initialize_model('speech_super_resolution', model_name, model_dir)
+
+            unique_id = uuid.uuid4().hex[:8]
+            output_dir = os.path.join(temp_dir, f"SR_{model_name}_{unique_id}")
+            os.makedirs(output_dir, exist_ok=True)
+            temp_resources['output_dir'] = output_dir
+            print(f"ClearVoiceSpeechSuperResolution: Output directory: {output_dir}")
+
+            model.args.input_path = input_path
+            model.args.output_dir = output_dir
+
+            print("[200] ClearVoiceSpeechSuperResolution: Starting model.process()...")
+            result = model.process(input_path, online_write=True, output_path=output_dir)
+            print("[201] ClearVoiceSpeechSuperResolution: ✓ Processing completed")
+            print(f"ClearVoiceSpeechSuperResolution: Result: {result}")
+
+            pbar.update_absolute(2, 3, None)
+
+            output_path = None
+            for root, dirs, files in os.walk(output_dir):
+                for file in files:
+                    if file.endswith('.wav'):
+                        output_path = os.path.join(root, file)
+                        temp_resources['output_files'].append(output_path)
+                        print(f"ClearVoiceSpeechSuperResolution: Found output: {output_path}, size={os.path.getsize(output_path)} bytes")
+                        break
+                if output_path:
+                    break
+
+            if not output_path:
+                raise RuntimeError("No output file found")
+
+            audio_output = self.audio_file_to_output(output_path)
+            if not audio_output:
+                raise RuntimeError("Failed to create audio output")
+
+            print(f"ClearVoiceSpeechSuperResolution: Output sample_rate={audio_output['sample_rate']}")
+            pbar.update_absolute(3, 3, None)
+
+            return (audio_output,)
+
+        except Exception as e:
+            print(f"Error during speech super-resolution: {e}")
+            import traceback
+            traceback.print_exc()
+            raise RuntimeError(f"Speech super-resolution failed: {e}")
+        finally:
+            if self.CLEANUP_TEMP_RESOURCES:
+                self.cleanup_temp_resources(temp_resources)
+            else:
+                print("[202] ClearVoiceBaseNode: Temporary resource cleanup is disabled")
+
+
 class ClearVoiceVideoSpeakerExtractionNode(ClearVoiceBaseNode):
     """ComfyUI node for video speaker extraction using ClearVoice"""
     
@@ -967,16 +1226,17 @@ class ClearVoiceVideoSpeakerExtractionNode(ClearVoiceBaseNode):
             },
             "optional": {
                 "enable_crop": ("BOOLEAN", {"default": False}),
+                "enable_sr_enhance": ("BOOLEAN", {"default": False}),
             }
         }
-    
+
     RETURN_TYPES = ("VIDEO", "VIDEO", "VIDEO", "VIDEO", "VIDEO")
     RETURN_NAMES = ("video_output_1", "video_output_2", "video_output_3", "video_output_4", "video_output_5")
     FUNCTION = "extract_speakers"
     CATEGORY = "ClearVoice"
     TITLE = "ClearVoice Video Speaker Extraction"
-    
-    def extract_speakers(self, video_input, enable_crop=False) -> Tuple[object, object, object, object, object]:
+
+    def extract_speakers(self, video_input, enable_crop=False, enable_sr_enhance=False) -> Tuple[object, object, object, object, object]:
         """Extract speakers from video and generate individual videos
         
         Args:
@@ -1262,8 +1522,67 @@ class ClearVoiceVideoSpeakerExtractionNode(ClearVoiceBaseNode):
                     print(f"ClearVoiceVideoSpeakerExtraction: Source video does not exist: {source_video}")
                     outputs[i] = None
             
+            # Apply SR enhancement to each video's audio if enabled
+            if enable_sr_enhance:
+                model_dir = os.path.join(folder_paths.models_dir, "ASR", "ClearerVoice-Studio")
+                print("ClearVoiceVideoSpeakerExtraction: Applying SR enhancement to each speaker video...")
+                for i in range(len(outputs)):
+                    if outputs[i] is not None and hasattr(outputs[i], 'filepath') and os.path.exists(outputs[i].filepath):
+                        video_path = outputs[i].filepath
+                        # Extract audio from video
+                        extract_wav = tempfile.NamedTemporaryFile(suffix='.wav', delete=False, dir=temp_dir)
+                        extract_wav_path = extract_wav.name
+                        extract_wav.close()
+                        out_wav_path = None
+                        try:
+                            extract_cmd = [
+                                "ffmpeg", "-i", video_path,
+                                "-vn", "-acodec", "pcm_s16le", "-ac", "1",
+                                "-y", extract_wav_path
+                            ]
+                            subprocess.run(extract_cmd, capture_output=True, check=True)
+
+                            # Build audio dict from extracted WAV
+                            with wave.open(extract_wav_path, 'rb') as wf:
+                                sr = wf.getframerate()
+                                data = wf.readframes(wf.getnframes())
+                            arr = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
+                            audio_dict = {"waveform": torch.tensor(arr).unsqueeze(0).unsqueeze(0), "sample_rate": sr}
+
+                            # Enhance
+                            enhanced = self._process_audio_with_sr(audio_dict, model_dir)
+
+                            if enhanced and enhanced.get('waveform') is not None:
+                                out_wav = tempfile.NamedTemporaryFile(suffix='.wav', delete=False, dir=temp_dir)
+                                out_wav_path = out_wav.name
+                                out_wav.close()
+                                e_np = enhanced['waveform'].squeeze().cpu().numpy().astype(np.float32)
+                                with wave.open(out_wav_path, 'wb') as wf:
+                                    wf.setnchannels(1)
+                                    wf.setsampwidth(2)
+                                    wf.setframerate(enhanced['sample_rate'])
+                                    wf.writeframes((e_np * 32767).astype(np.int16).tobytes())
+
+                                # Re-merge: overwrite video in place
+                                merge_cmd = [
+                                    "ffmpeg", "-i", video_path,
+                                    "-i", out_wav_path,
+                                    "-c:v", "copy", "-c:a", "aac",
+                                    "-map", "0:v:0", "-map", "1:a:0",
+                                    "-y", video_path
+                                ]
+                                subprocess.run(merge_cmd, capture_output=True, check=True)
+                                print(f"ClearVoiceVideoSpeakerExtraction: Speaker {i+1} audio enhanced and re-merged")
+                        except Exception as e:
+                            print(f"ClearVoiceVideoSpeakerExtraction: SR enhancement failed for speaker {i+1}: {e}")
+                        finally:
+                            if os.path.exists(extract_wav_path):
+                                os.unlink(extract_wav_path)
+                            if out_wav_path and os.path.exists(out_wav_path):
+                                os.unlink(out_wav_path)
+
             pbar.update_absolute(4, 4, None)
-            
+
             print(f"Video speaker extraction completed: {num_speakers} speakers found")
             return tuple(outputs)
             

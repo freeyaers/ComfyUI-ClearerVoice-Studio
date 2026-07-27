@@ -117,6 +117,7 @@ else:
 from .nodes import (
     ClearVoiceSpeechSeparationNode,
     ClearVoiceSpeechDenoiseNode,
+    ClearVoiceSpeechSuperResolutionNode,
     ClearVoiceVideoSpeakerExtractionNode
 )
 
@@ -124,12 +125,14 @@ from .nodes import (
 NODE_CLASS_MAPPINGS = {
     "ClearVoiceSpeechSeparation": ClearVoiceSpeechSeparationNode,
     "ClearVoiceSpeechDenoise": ClearVoiceSpeechDenoiseNode,
+    "ClearVoiceSpeechSuperResolution": ClearVoiceSpeechSuperResolutionNode,
     "ClearVoiceVideoSpeakerExtraction": ClearVoiceVideoSpeakerExtractionNode
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "ClearVoiceSpeechSeparation": "ClearVoice Speech Separation",
     "ClearVoiceSpeechDenoise": "ClearVoice Speech Denoise",
+    "ClearVoiceSpeechSuperResolution": "ClearVoice Speech Super Resolution",
     "ClearVoiceVideoSpeakerExtraction": "ClearVoice Video Speaker Extraction"
 }
 

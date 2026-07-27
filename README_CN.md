@@ -1,4 +1,4 @@
-👉 **[English](https://github.com/freeyaers/ComfyUI-ClearerVoice-Studio/blob/main/README.md)**
+👉 **[English](README.md)**
 
 # ComfyUI-ClearerVoice-Studio
 
@@ -156,10 +156,10 @@ ComfyUI-ClearerVoice-Studio/
 
 ## 工作流示例
 
-![Image text](https://github.com/freeyaers/ComfyUI-ClearerVoice-Studio/blob/main/workflows/img1.png)
-![Image text](https://github.com/freeyaers/ComfyUI-ClearerVoice-Studio/blob/main/workflows/img2.png)
-![Image text](https://github.com/freeyaers/ComfyUI-ClearerVoice-Studio/blob/main/workflows/img3.png)
-![Image text](https://github.com/freeyaers/ComfyUI-ClearerVoice-Studio/blob/main/workflows/img4.png)
+![Image text](workflows/img1.png)
+![Image text](workflows/img2.png)
+![Image text](workflows/img3.png)
+![Image text](workflows/img4.png)
 
 
 ### 基本音频降噪
